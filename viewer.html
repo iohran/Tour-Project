@@ -232,7 +232,8 @@
     holder.appendChild(renderer.domElement);
 
     const geometry = new THREE.SphereGeometry(500, 128, 64);
-    const material = new THREE.MeshBasicMaterial({ color: 0x2a2a2a, side: THREE.BackSide });
+    geometry.scale(-1, 1, 1);
+    const material = new THREE.MeshBasicMaterial({ color: 0x2a2a2a });
     sphereMesh = new THREE.Mesh(geometry, material);
     scene.add(sphereMesh);
 
@@ -410,8 +411,9 @@
   function startCrossfade(oldTexture) {
     disposeFadeSphere();
     const geometry = new THREE.SphereGeometry(495, 96, 48);
+    geometry.scale(-1, 1, 1);
     const material = new THREE.MeshBasicMaterial({
-      map: oldTexture, side: THREE.BackSide, transparent: true, opacity: 1, depthWrite: false
+      map: oldTexture, transparent: true, opacity: 1, depthWrite: false
     });
     fadeSphere = new THREE.Mesh(geometry, material);
     scene.add(fadeSphere);
