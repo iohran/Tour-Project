@@ -1,0 +1,15 @@
+{
+  "clientName": "Teste",
+  "password": "4821",
+  "points": [
+    {
+      "id": "quarto",
+      "room": "Quarto",
+      "image": "quarto.jpg",
+      "x": 100,
+      "y": 100,
+      "orientationRef": 0,
+      "connections": []
+    }
+  ]
+}

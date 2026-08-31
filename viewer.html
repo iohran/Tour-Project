@@ -1,0 +1,588 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title id="page-title">Planta Viva</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #0a0a0a; font-family: system-ui, -apple-system, sans-serif; overflow: hidden; }
+  #viewer-container { position: relative; width: 100%; height: 100%; overflow: hidden; }
+  #canvas-holder { width: 100%; height: 100%; cursor: grab; touch-action: none; }
+  #canvas-holder.dragging { cursor: grabbing; }
+  #room-label {
+    position: absolute; top: 16px; left: 16px; z-index: 10;
+    color: #fff; font-size: 14px; font-weight: 600; background: rgba(0,0,0,0.45);
+    padding: 8px 14px; border-radius: 8px; display: none;
+  }
+  #hint {
+    position: absolute; bottom: 16px; right: 16px;
+    color: rgba(255,255,255,0.5); font-size: 12px; z-index: 10; text-align: right;
+  }
+  #labels-layer { position: absolute; inset: 0; pointer-events: none; z-index: 8; }
+  #minimap-wrap {
+    position: absolute; bottom: 16px; left: 16px; z-index: 10;
+    background: rgba(10,10,10,0.38); border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 10px; padding: 8px; display: none;
+    opacity: 0.55; transition: opacity 0.2s ease, background 0.2s ease, border-color 0.2s ease;
+  }
+  #minimap-wrap:hover, #minimap-wrap.active {
+    opacity: 1; background: rgba(10,10,10,0.72); border-color: rgba(255,255,255,0.18);
+  }
+  #minimap-label {
+    color: rgba(255,255,255,0.75); font-size: 11px; margin-bottom: 6px;
+    font-weight: 600; text-transform: uppercase; letter-spacing: .04em;
+  }
+  #minimap-canvas { display: block; border-radius: 6px; cursor: pointer; }
+  #minimap-resize {
+    position: absolute; right: 3px; bottom: 3px; width: 15px; height: 15px;
+    cursor: nwse-resize; opacity: 0.5; transition: opacity 0.2s ease;
+  }
+  #minimap-resize svg { width: 100%; height: 100%; display: block; }
+  #minimap-wrap:hover #minimap-resize { opacity: 0.9; }
+  #zoom-controls {
+    position: absolute; top: 50%; right: 14px; transform: translateY(-50%);
+    z-index: 10; display: none; flex-direction: column; gap: 8px;
+  }
+  #zoom-controls.visible { display: flex; }
+  #zoom-controls button {
+    width: 40px; height: 40px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.3);
+    background: rgba(20,22,24,0.85); color: #fff; font-size: 22px; font-weight: 600;
+    display: flex; align-items: center; justify-content: center; line-height: 1; padding: 0;
+    -webkit-tap-highlight-color: transparent; user-select: none; touch-action: manipulation;
+  }
+  #zoom-controls button:active { background: rgba(217,89,12,0.9); }
+  #loading-state {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    color: rgba(255,255,255,0.5); font-size: 14px; z-index: 5; text-align: center; padding: 0 24px;
+  }
+  .point-label {
+    position: absolute; transform: translate(-50%, -50%); z-index: 8;
+    display: flex; flex-direction: column; align-items: center; gap: 5px;
+    cursor: pointer; pointer-events: auto;
+  }
+  .point-label .disc {
+    position: relative; width: 28px; height: 28px; border-radius: 50%;
+    background: rgba(20,22,24,0.55);
+    backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+    border: 1.5px solid rgba(255,255,255,0.65);
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.35);
+    transition: transform 0.18s ease, background 0.18s ease, border-color 0.18s ease;
+  }
+  .point-label .disc svg { width: 13px; height: 13px; }
+  .point-label .disc::after {
+    content: ''; position: absolute; inset: -6px; border-radius: 50%;
+    border: 1.5px solid rgba(217,89,12,0.55);
+    animation: pl-pulse 2.4s ease-out infinite;
+  }
+  @keyframes pl-pulse {
+    0% { transform: scale(0.8); opacity: 0.9; }
+    100% { transform: scale(1.6); opacity: 0; }
+  }
+  .point-label .room-name {
+    font-size: 11px; font-weight: 500; color: #fff;
+    background: rgba(10,10,10,0.55); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+    padding: 3px 9px; border-radius: 10px; white-space: nowrap;
+    opacity: 0.82; transform: translateY(0);
+    transition: opacity 0.18s ease, transform 0.18s ease;
+    pointer-events: none;
+  }
+  .point-label:hover .disc {
+    transform: scale(1.15);
+    background: rgba(217,89,12,0.85);
+    border-color: rgba(255,255,255,0.9);
+  }
+  .point-label:hover .room-name { opacity: 1; transform: translateY(-1px); }
+
+  #lock-screen {
+    position: fixed; inset: 0; z-index: 100; background: #0a0a0a;
+    display: none; align-items: center; justify-content: center; flex-direction: column; gap: 14px;
+  }
+  #lock-screen.visible { display: flex; }
+  #lock-screen h2 { color: #fff; font-size: 1rem; font-weight: 600; margin: 0; }
+  #lock-form { display: flex; gap: 8px; }
+  #lock-input {
+    font-size: 1.1rem; letter-spacing: 0.1em; text-align: center; width: 140px;
+    padding: 10px 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.25);
+    background: rgba(255,255,255,0.06); color: #fff;
+  }
+  #lock-input:focus { outline: 2px solid #d9590c; }
+  #lock-form button {
+    padding: 10px 18px; border-radius: 8px; border: none; background: #d9590c; color: #fff;
+    font-weight: 600; cursor: pointer;
+  }
+  #lock-error { color: #ff8a65; font-size: 0.82rem; min-height: 1.1em; }
+</style>
+</head>
+<body>
+
+<div id="lock-screen">
+  <h2 id="lock-title">Digite a senha</h2>
+  <form id="lock-form">
+    <input id="lock-input" type="text" inputmode="numeric" autocomplete="off" placeholder="senha" autofocus>
+    <button type="submit">Entrar</button>
+  </form>
+  <div id="lock-error"></div>
+</div>
+
+<div id="viewer-container">
+  <span id="room-label"></span>
+  <div id="loading-state">Carregando...</div>
+  <div id="canvas-holder"></div>
+  <div id="labels-layer"></div>
+  <div id="minimap-wrap">
+    <div id="minimap-label">planta</div>
+    <canvas id="minimap-canvas" width="200" height="200"></canvas>
+    <div id="minimap-resize" title="Arraste pra aumentar/diminuir o minimapa">
+      <svg viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.85)" stroke-width="2" stroke-linecap="round"><path d="M4 20L20 4M10 20L20 10M16 20L20 16"/></svg>
+    </div>
+  </div>
+  <div id="zoom-controls">
+    <button id="zoom-in" type="button" aria-label="Aproximar">+</button>
+    <button id="zoom-out" type="button" aria-label="Afastar">&minus;</button>
+  </div>
+  <div id="hint">Arraste para olhar ao redor · Belisque ou use os botões pra zoom<br>Clique nas setas ou na planta pra navegar</div>
+</div>
+
+<script src="_lib/three.min.js"></script>
+<script>
+(function () {
+  // ---------------------------------------------------------------------
+  // Cada cliente é uma pasta ao lado deste arquivo (ex.: ./cliente-daniel/)
+  // contendo config.json (ou pontos_planta.json) + as fotos referenciadas
+  // nele. Nada é gerado/embutido de antemão — este visualizador é o mesmo
+  // pra todos os clientes, e busca os arquivos certos a partir de ?cliente=.
+  // ---------------------------------------------------------------------
+  const params = new URLSearchParams(location.search);
+  const clientFolder = params.get('cliente');
+
+  const holder = document.getElementById('canvas-holder');
+  const labelsLayer = document.getElementById('labels-layer');
+  const roomLabel = document.getElementById('room-label');
+  const loadingState = document.getElementById('loading-state');
+
+  let CONFIG = null;
+  let scene, camera, renderer, sphereMesh;
+  let fadeSphere = null, fadeStart = 0;
+  const FADE_MS = 550;
+  let isDragging = false;
+  let lastX = 0, lastY = 0;
+  let lon = 0, lat = 0;
+  const minFov = 12, maxFov = 90;
+  let currentPointId = null;
+  const activePointers = new Map();
+  let isPinching = false, pinchStartDist = 0, pinchStartFov = 75;
+
+  function showError(msg) {
+    loadingState.style.display = 'flex';
+    loadingState.textContent = msg;
+  }
+
+  async function loadConfig() {
+    if (!clientFolder) { showError('Link inválido: falta o parâmetro ?cliente= apontando pra pasta do projeto.'); return; }
+    const base = clientFolder.replace(/\/+$/, '') + '/';
+    for (const name of ['config.json', 'pontos_planta.json']) {
+      try {
+        const r = await fetch(base + name, { cache: 'no-store' });
+        if (r.ok) { CONFIG = await r.json(); CONFIG.__base = base; break; }
+      } catch (e) { /* tenta o próximo nome */ }
+    }
+    if (!CONFIG) { showError('Não encontrei config.json (ou pontos_planta.json) em "' + clientFolder + '".'); return; }
+    if (!CONFIG.points || !CONFIG.points.length) { showError('Esse projeto não tem nenhum ponto marcado.'); return; }
+    document.getElementById('page-title').textContent = (params.get('titulo') || clientFolder) + ' — Planta Viva';
+    loadingState.style.display = 'none';
+    requireUnlock();
+  }
+
+  // proteção simples: só evita abertura casual do link (não é segurança de
+  // verdade - config.json e as fotos continuam acessíveis por URL direta
+  // pra quem souber/adivinhar o caminho exato)
+  const SESSION_KEY = 'pv-unlocked-' + clientFolder;
+  function requireUnlock() {
+    if (!CONFIG.password || sessionStorage.getItem(SESSION_KEY) === '1') { init(); return; }
+    const lockScreen = document.getElementById('lock-screen');
+    const form = document.getElementById('lock-form');
+    const input = document.getElementById('lock-input');
+    const error = document.getElementById('lock-error');
+    document.getElementById('lock-title').textContent = 'Digite a senha — ' + (CONFIG.clientName || clientFolder);
+    lockScreen.classList.add('visible');
+    input.focus();
+    form.addEventListener('submit', function (ev) {
+      ev.preventDefault();
+      if (input.value.trim() === String(CONFIG.password)) {
+        sessionStorage.setItem(SESSION_KEY, '1');
+        lockScreen.classList.remove('visible');
+        init();
+      } else {
+        error.textContent = 'Senha incorreta.';
+        input.value = '';
+        input.focus();
+      }
+    });
+  }
+
+  function init() {
+    scene = new THREE.Scene();
+    camera = new THREE.PerspectiveCamera(75, holder.clientWidth / holder.clientHeight, 0.1, 1100);
+
+    renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(window.devicePixelRatio || 1);
+    renderer.setSize(holder.clientWidth, holder.clientHeight);
+    renderer.outputEncoding = THREE.sRGBEncoding;
+    holder.appendChild(renderer.domElement);
+
+    const geometry = new THREE.SphereGeometry(500, 128, 64);
+    const material = new THREE.MeshBasicMaterial({ color: 0x2a2a2a, side: THREE.BackSide });
+    sphereMesh = new THREE.Mesh(geometry, material);
+    scene.add(sphereMesh);
+
+    holder.addEventListener('pointerdown', onPointerDown);
+    holder.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp);
+    window.addEventListener('pointercancel', onPointerUp);
+    holder.addEventListener('wheel', onWheel, { passive: false });
+    window.addEventListener('resize', onResize);
+    setupZoomControls();
+
+    animate();
+    setupMinimap();
+    if (CONFIG.points[0]) goToPoint(CONFIG.points[0].id);
+  }
+
+  function pinchDistance() {
+    const pts = Array.from(activePointers.values());
+    if (pts.length < 2) return 0;
+    const dx = pts[0].x - pts[1].x, dy = pts[0].y - pts[1].y;
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+
+  function onPointerDown(e) {
+    activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (activePointers.size === 2) {
+      isPinching = true;
+      isDragging = false;
+      holder.classList.remove('dragging');
+      pinchStartDist = pinchDistance();
+      pinchStartFov = camera.fov;
+    } else if (activePointers.size === 1) {
+      isDragging = true;
+      holder.classList.add('dragging');
+      lastX = e.clientX; lastY = e.clientY;
+    }
+  }
+  function onPointerMove(e) {
+    if (!activePointers.has(e.pointerId)) return;
+    activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (isPinching && activePointers.size === 2) {
+      const dist = pinchDistance();
+      if (dist > 0 && pinchStartDist > 0) {
+        camera.fov = Math.max(minFov, Math.min(maxFov, pinchStartFov * (pinchStartDist / dist)));
+        camera.updateProjectionMatrix();
+      }
+      return;
+    }
+    if (!isDragging) return;
+    const dx = e.clientX - lastX, dy = e.clientY - lastY;
+    lastX = e.clientX; lastY = e.clientY;
+    lon -= dx * 0.15;
+    lat = Math.max(-85, Math.min(85, lat + dy * 0.15));
+  }
+  function onPointerUp(e) {
+    if (e && e.pointerId !== undefined) activePointers.delete(e.pointerId);
+    if (activePointers.size < 2) isPinching = false;
+    if (activePointers.size === 1) {
+      const remaining = activePointers.values().next().value;
+      if (remaining) { lastX = remaining.x; lastY = remaining.y; }
+      isDragging = true;
+      holder.classList.add('dragging');
+    } else if (activePointers.size === 0) {
+      isDragging = false;
+      holder.classList.remove('dragging');
+    }
+  }
+  function onWheel(e) {
+    e.preventDefault();
+    camera.fov = Math.max(minFov, Math.min(maxFov, camera.fov + e.deltaY * 0.02));
+    camera.updateProjectionMatrix();
+  }
+  function stepZoom(delta) {
+    camera.fov = Math.max(minFov, Math.min(maxFov, camera.fov + delta));
+    camera.updateProjectionMatrix();
+  }
+  function setupZoomControls() {
+    const wrap = document.getElementById('zoom-controls');
+    const inBtn = document.getElementById('zoom-in');
+    const outBtn = document.getElementById('zoom-out');
+    if (!wrap) return;
+    const isTouch = ('ontouchstart' in window) || navigator.maxTouchPoints > 0 ||
+      (window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+    if (isTouch) wrap.classList.add('visible');
+    if (inBtn) inBtn.addEventListener('click', () => stepZoom(-8));
+    if (outBtn) outBtn.addEventListener('click', () => stepZoom(8));
+  }
+  function onResize() {
+    camera.aspect = holder.clientWidth / holder.clientHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(holder.clientWidth, holder.clientHeight);
+  }
+
+  function animate() {
+    requestAnimationFrame(animate);
+    const phi = THREE.MathUtils.degToRad(90 - lat);
+    const theta = THREE.MathUtils.degToRad(lon);
+    const target = new THREE.Vector3(
+      500 * Math.sin(phi) * Math.cos(theta),
+      500 * Math.cos(phi),
+      500 * Math.sin(phi) * Math.sin(theta)
+    );
+    camera.lookAt(target);
+    updateFade();
+    renderer.render(scene, camera);
+    updateLabels();
+    drawMinimap();
+  }
+
+  function updateFade() {
+    if (!fadeSphere) return;
+    const elapsed = performance.now() - fadeStart;
+    const t = Math.min(1, elapsed / FADE_MS);
+    const eased = 1 - Math.pow(1 - t, 3);
+    fadeSphere.material.opacity = 1 - eased;
+    if (t >= 1) disposeFadeSphere();
+  }
+
+  function disposeFadeSphere() {
+    if (!fadeSphere) return;
+    scene.remove(fadeSphere);
+    fadeSphere.geometry.dispose();
+    if (fadeSphere.material.map) fadeSphere.material.map.dispose();
+    fadeSphere.material.dispose();
+    fadeSphere = null;
+  }
+
+  function goToPoint(pointId) {
+    const point = CONFIG.points.find(p => p.id === pointId);
+    if (!point || !point.image) return;
+    currentPointId = pointId;
+    lon = 0; lat = 0;
+    roomLabel.style.display = 'inline-block';
+    roomLabel.textContent = point.room || point.id;
+    rebuildLabelSet();
+    loadingState.style.display = 'flex';
+    loadingState.textContent = 'Carregando...';
+    loadTextureFromUrl(CONFIG.__base + point.image);
+  }
+
+  function loadTextureFromUrl(url) {
+    const img = new Image();
+    img.onload = () => applyTexture(img);
+    img.onerror = () => showError('Não consegui carregar a foto "' + url + '".');
+    img.src = url;
+  }
+
+  function applyTexture(img) {
+    const maxSize = renderer.capabilities.maxTextureSize;
+    let source = img;
+    if (img.width > maxSize || img.height > maxSize) {
+      const scale = maxSize / Math.max(img.width, img.height);
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.floor(img.width * scale);
+      canvas.height = Math.floor(img.height * scale);
+      canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+      source = canvas;
+    }
+    const texture = new THREE.Texture(source);
+    texture.encoding = THREE.sRGBEncoding;
+    texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    texture.minFilter = THREE.LinearMipmapLinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    texture.needsUpdate = true;
+
+    const oldTexture = sphereMesh.material.map;
+    sphereMesh.material.map = texture;
+    sphereMesh.material.color.set(0xffffff);
+    sphereMesh.material.needsUpdate = true;
+    loadingState.style.display = 'none';
+
+    if (oldTexture) startCrossfade(oldTexture);
+  }
+
+  function startCrossfade(oldTexture) {
+    disposeFadeSphere();
+    const geometry = new THREE.SphereGeometry(495, 96, 48);
+    const material = new THREE.MeshBasicMaterial({
+      map: oldTexture, side: THREE.BackSide, transparent: true, opacity: 1, depthWrite: false
+    });
+    fadeSphere = new THREE.Mesh(geometry, material);
+    scene.add(fadeSphere);
+    fadeStart = performance.now();
+  }
+
+  const FLIP_SIGN = 1;
+
+  function bearingToNeighbor(from, to) {
+    const dx = to.x - from.x, dy = to.y - from.y;
+    let deg = Math.atan2(dx, -dy) * 180 / Math.PI;
+    return ((deg % 360) + 360) % 360;
+  }
+
+  let labelEls = {};
+
+  function rebuildLabelSet() {
+    labelsLayer.innerHTML = '';
+    labelEls = {};
+    const point = CONFIG.points.find(p => p.id === currentPointId);
+    if (!point) return;
+    (point.connections || []).forEach(neighborId => {
+      const neighbor = CONFIG.points.find(p => p.id === neighborId);
+      if (!neighbor) return;
+      const label = document.createElement('div');
+      label.className = 'point-label';
+      label.innerHTML = `<div class="disc"><svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg></div><div class="room-name">${neighbor.room || neighbor.id}</div>`;
+      label.addEventListener('click', () => goToPoint(neighborId));
+      labelsLayer.appendChild(label);
+      labelEls[neighborId] = label;
+    });
+  }
+
+  function updateLabels() {
+    const point = CONFIG.points.find(p => p.id === currentPointId);
+    if (!point) return;
+    const rect = holder.getBoundingClientRect();
+
+    (point.connections || []).forEach(neighborId => {
+      const neighbor = CONFIG.points.find(p => p.id === neighborId);
+      const label = labelEls[neighborId];
+      if (!neighbor || !label) return;
+
+      const bearing = bearingToNeighbor(point, neighbor);
+      let L = bearing - point.orientationRef;
+      L = ((L + 180) % 360 + 360) % 360 - 180;
+      const labelLonRad = THREE.MathUtils.degToRad(FLIP_SIGN * L);
+
+      const pos3d = new THREE.Vector3(500 * Math.cos(labelLonRad), 0, 500 * Math.sin(labelLonRad));
+      const projected = pos3d.clone().project(camera);
+      if (projected.z > 1) { label.style.display = 'none'; return; }
+
+      const screenX = (projected.x * 0.5 + 0.5) * rect.width;
+      const screenY = (-projected.y * 0.5 + 0.5) * rect.height;
+      if (screenX < -40 || screenX > rect.width + 40 || screenY < -40 || screenY > rect.height + 40) {
+        label.style.display = 'none';
+        return;
+      }
+      label.style.display = 'flex';
+      label.style.left = screenX + 'px';
+      label.style.top = screenY + 'px';
+    });
+  }
+
+  // ---------- Mini-planta ----------
+
+  const minimapWrap = document.getElementById('minimap-wrap');
+  const minimapCanvas = document.getElementById('minimap-canvas');
+  const minimapCtx = minimapCanvas.getContext('2d');
+  const minimapResizeHandle = document.getElementById('minimap-resize');
+  let minimapImg = null;
+  let minimapMaxSide = 220;
+
+  function applyMinimapSize() {
+    if (!minimapImg) return;
+    const scale = Math.min(1, minimapMaxSide / Math.max(minimapImg.naturalWidth, minimapImg.naturalHeight));
+    minimapCanvas.width = Math.round(minimapImg.naturalWidth * scale);
+    minimapCanvas.height = Math.round(minimapImg.naturalHeight * scale);
+    drawMinimap();
+  }
+
+  function setupMinimap() {
+    if (!CONFIG.planThumbnail) { minimapWrap.style.display = 'none'; return; }
+    const img = new Image();
+    img.onload = () => {
+      minimapImg = img;
+      applyMinimapSize();
+      minimapWrap.style.display = 'block';
+    };
+    img.src = CONFIG.planThumbnail;
+  }
+
+  let resizingMinimap = false, resizeStartX = 0, resizeStartY = 0, resizeStartSize = 0;
+  minimapResizeHandle.addEventListener('pointerdown', e => {
+    e.stopPropagation(); e.preventDefault();
+    resizingMinimap = true;
+    resizeStartX = e.clientX; resizeStartY = e.clientY;
+    resizeStartSize = minimapMaxSide;
+    minimapWrap.classList.add('active');
+  });
+  window.addEventListener('pointermove', e => {
+    if (!resizingMinimap) return;
+    const delta = Math.max(e.clientX - resizeStartX, e.clientY - resizeStartY);
+    minimapMaxSide = Math.max(120, Math.min(460, resizeStartSize + delta));
+    applyMinimapSize();
+  });
+  window.addEventListener('pointerup', () => {
+    if (!resizingMinimap) return;
+    resizingMinimap = false;
+    minimapWrap.classList.remove('active');
+  });
+
+  minimapCanvas.addEventListener('click', e => {
+    if (!CONFIG.planImageSize) return;
+    const rect = minimapCanvas.getBoundingClientRect();
+    const cx = (e.clientX - rect.left) * (minimapCanvas.width / rect.width);
+    const cy = (e.clientY - rect.top) * (minimapCanvas.height / rect.height);
+    const scaleX = CONFIG.planImageSize.width / minimapCanvas.width;
+    const scaleY = CONFIG.planImageSize.height / minimapCanvas.height;
+    const nx = cx * scaleX, ny = cy * scaleY;
+
+    let closest = null, closestDist = Infinity;
+    CONFIG.points.forEach(p => {
+      const d = Math.hypot(p.x - nx, p.y - ny);
+      if (d < closestDist) { closestDist = d; closest = p; }
+    });
+    if (closest) goToPoint(closest.id);
+  });
+
+  function drawMinimap() {
+    if (!minimapImg || !CONFIG.planImageSize) return;
+    const w = minimapCanvas.width, h = minimapCanvas.height;
+    const scaleX = w / CONFIG.planImageSize.width;
+    const scaleY = h / CONFIG.planImageSize.height;
+
+    minimapCtx.clearRect(0, 0, w, h);
+    minimapCtx.drawImage(minimapImg, 0, 0, w, h);
+
+    const current = currentPointId ? CONFIG.points.find(p => p.id === currentPointId) : null;
+
+    CONFIG.points.forEach(p => {
+      const x = p.x * scaleX, y = p.y * scaleY;
+      const isCurrent = current && p.id === current.id;
+      minimapCtx.beginPath();
+      minimapCtx.arc(x, y, isCurrent ? 6 : 4, 0, Math.PI * 2);
+      minimapCtx.fillStyle = isCurrent ? '#d9590c' : '#fff';
+      minimapCtx.fill();
+      minimapCtx.lineWidth = 1.5;
+      minimapCtx.strokeStyle = '#14181a';
+      minimapCtx.stroke();
+    });
+
+    if (!current) return;
+
+    const x = current.x * scaleX, y = current.y * scaleY;
+    const bearing = ((current.orientationRef + lon) % 360 + 360) % 360;
+    const rad = (bearing - 90) * Math.PI / 180;
+    const coneLen = Math.min(w, h) * 0.22;
+    const spread = 26 * Math.PI / 180;
+
+    minimapCtx.beginPath();
+    minimapCtx.moveTo(x, y);
+    minimapCtx.lineTo(x + Math.cos(rad - spread) * coneLen, y + Math.sin(rad - spread) * coneLen);
+    minimapCtx.lineTo(x + Math.cos(rad + spread) * coneLen, y + Math.sin(rad + spread) * coneLen);
+    minimapCtx.closePath();
+    minimapCtx.fillStyle = 'rgba(217,89,12,0.45)';
+    minimapCtx.fill();
+  }
+
+  loadConfig();
+})();
+</script>
+</body>
+</html>
