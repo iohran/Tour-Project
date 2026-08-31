@@ -371,7 +371,8 @@
     rebuildLabelSet();
     loadingState.style.display = 'flex';
     loadingState.textContent = 'Carregando...';
-    const flipX = point.flipX != null ? point.flipX : CONFIG.flipX;
+    const flipOverride = params.get('flip');
+    const flipX = flipOverride != null ? flipOverride === '1' : (point.flipX != null ? point.flipX : CONFIG.flipX);
     loadTextureFromUrl(CONFIG.__base + point.image, !!flipX);
   }
 
