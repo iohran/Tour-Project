@@ -365,7 +365,9 @@
     const point = CONFIG.points.find(p => p.id === pointId);
     if (!point || !point.image) return;
     currentPointId = pointId;
-    lon = 0; lat = 0;
+    const yawOverride = params.get('yaw');
+    lon = yawOverride != null ? Number(yawOverride) : (point.yawOffset != null ? point.yawOffset : (CONFIG.yawOffset || 0));
+    lat = 0;
     roomLabel.style.display = 'inline-block';
     roomLabel.textContent = point.room || point.id;
     rebuildLabelSet();
