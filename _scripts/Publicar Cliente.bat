@@ -1,6 +1,7 @@
 @echo off
 setlocal
 set "SRC=%~dp0"
+if "%SRC:~-1%"=="\" set "SRC=%SRC:~0,-1%"
 
 echo Publicando cliente a partir de:
 echo   %SRC%
