@@ -1,17 +1,23 @@
 #!/usr/bin/env python3
 """
-Publica um cliente novo no Tour-Project a partir de uma pasta com o
-config.json (exportado do posicionador_pontos.html) e as fotos.
+Publica um cliente (novo ou existente) no Tour-Project a partir de uma
+pasta com o config.json (exportado do posicionador_pontos.html) e as fotos.
 
-Uso:
+Uso (cliente novo):
     python novo_cliente.py <pasta_com_config_e_fotos> <nome_do_cliente> [--senha SENHA] [--sem-push]
+
+Uso (atualizar um cliente que ja existe, mesmo link/QR code de sempre):
+    python novo_cliente.py <pasta_com_config_e_fotos> <nome_do_cliente> --atualizar <slug_da_pasta_existente>
 
 O que faz:
   1. Acha o config.json/pontos_planta.json na pasta indicada
-  2. Gera uma pasta com slug aleatorio dentro do repo (ex.: joao-9f21ab)
+  2. Cliente novo: gera uma pasta com slug aleatorio dentro do repo (ex.: joao-9f21ab)
+     Atualizacao: usa a pasta existente indicada em --atualizar, apagando o
+     conteudo antigo dela antes de copiar o novo (senha antiga e preservada
+     a menos que --senha seja passado)
   3. Copia o config (com clientName/password adicionados) + as fotos referenciadas
   4. git add + commit + push (a menos que --sem-push)
-  5. Gera o QR code em ./Desktop/QR Codes Clientes/<slug>.png
+  5. Gera/atualiza o QR code em ./Desktop/QR Codes Clientes/<slug>.png
 
 Roda de dentro de qualquer pasta - so precisa do caminho pro repo estar
 certo abaixo (REPO_DIR).
@@ -49,7 +55,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("pasta", help="pasta com o config.json/pontos_planta.json + fotos")
     ap.add_argument("nome", help='nome do cliente (ex.: "Joao Silva")')
-    ap.add_argument("--senha", help="senha de acesso (default: gera 4 digitos aleatorios)")
+    ap.add_argument("--senha", help="senha de acesso (default: mantem a antiga se for atualizacao, senao gera 4 digitos aleatorios)")
+    ap.add_argument("--atualizar", metavar="SLUG", help="nome da pasta existente pra atualizar, em vez de criar uma nova (mantem o mesmo link/QR code)")
     ap.add_argument("--sem-push", action="store_true", help="nao faz git commit/push, so monta a pasta")
     args = ap.parse_args()
 
@@ -82,10 +89,39 @@ def main():
     if not image_files:
         raise SystemExit("Nenhum ponto desse config tem foto ainda - calibre pelo menos um antes de publicar.")
 
-    senha = args.senha or str(secrets.randbelow(9000) + 1000)
-    slug = slugify(args.nome)
-    dest = os.path.join(REPO_DIR, slug)
-    os.makedirs(dest, exist_ok=False)
+    is_update = bool(args.atualizar)
+
+    if is_update:
+        slug = args.atualizar
+        dest = os.path.join(REPO_DIR, slug)
+        if not os.path.isdir(dest):
+            raise SystemExit(f"--atualizar aponta pra uma pasta que nao existe: {dest}")
+
+        # preserva a senha antiga a menos que uma nova seja passada explicitamente
+        senha = args.senha
+        if senha is None:
+            old_config_path = os.path.join(dest, "config.json")
+            if os.path.isfile(old_config_path):
+                try:
+                    with open(old_config_path, encoding="utf-8") as f:
+                        old_cfg = json.load(f)
+                    senha = old_cfg.get("password")
+                except (json.JSONDecodeError, OSError):
+                    pass
+        if senha is None:
+            senha = str(secrets.randbelow(9000) + 1000)
+
+        # limpa o conteudo antigo (fotos que nao existem mais no config novo
+        # nao devem sobrar) antes de copiar o que vem agora
+        for name in os.listdir(dest):
+            path = os.path.join(dest, name)
+            if os.path.isfile(path):
+                os.remove(path)
+    else:
+        senha = args.senha or str(secrets.randbelow(9000) + 1000)
+        slug = slugify(args.nome)
+        dest = os.path.join(REPO_DIR, slug)
+        os.makedirs(dest, exist_ok=False)
 
     cfg["clientName"] = args.nome
     cfg["password"] = senha
@@ -95,15 +131,17 @@ def main():
     for name in image_files:
         shutil.copy2(os.path.join(pasta, name), os.path.join(dest, name))
 
-    print(f"Pasta criada: {dest}")
+    acao = "atualizada" if is_update else "criada"
+    print(f"Pasta {acao}: {dest}")
     print(f"  {len(image_files)} foto(s) copiada(s), {len(points) - len(image_files)} ponto(s) ainda sem foto")
 
     url = f"{BASE_URL}/viewer.html?cliente={slug}"
 
     if not args.sem_push:
-        subprocess.run(["git", "add", slug], cwd=REPO_DIR, check=True)
+        subprocess.run(["git", "add", "-A", "--", slug], cwd=REPO_DIR, check=True)
+        verbo = "Update" if is_update else "Add"
         subprocess.run(
-            ["git", "commit", "-m", f"Add client {args.nome} ({slug})"],
+            ["git", "commit", "-m", f"{verbo} client {args.nome} ({slug})"],
             cwd=REPO_DIR, check=True,
         )
         subprocess.run(["git", "push"], cwd=REPO_DIR, check=True)
